@@ -1,90 +1,85 @@
-[project]
+[tool.poetry]
 name = "osworld"
 version = "0.1.0"
-description = "Add your description here"
+description = "osworld poetry env"
+authors = ["taehyeonggil"]
 readme = "README.md"
-requires-python = ">=3.12"
-dependencies = [
-    "numpy",
-    "backoff",
-    "pandas",
-    "openai",
-    "anthropic",
-    "fastapi",
-    "zhipuai",
-    "groq",
-    "boto3",
-    "uvicorn",
-    "paddleocr",
-    "paddlepaddle",
-    "together",
-    "scikit-learn",
-    "websockets",
-    "tiktoken",
-    "pyautogui~=0.9.54",
-    "toml",
-    "exa_py",
-    "black",
-    "certifi",
-    "pytesseract",
-    "google-genai",
-    "python-dotenv",
-    "Pillow~=11.0.0",
-    "fabric",
-    "gymnasium~=0.28.1",
-    "requests~=2.31.0",
-    "pytz~=2024.1",
-    "transformers~=4.35.2",
-    "torch~=2.5.0",
-    "accelerate",
-    "opencv-python~=4.8.1.78",
-    "matplotlib~=3.7.4",
-    "psutil~=5.9.6",
-    "tqdm~=4.65.0",
-    "flask~=3.0.0",
-    "requests-toolbelt~=1.0.0",
-    "lxml",
-    "cssselect",
-    "xmltodict",
-    "openpyxl",
-    "python-docx",
-    "python-pptx",
-    "pypdf",
-    "PyGetWindow",
-    "rapidfuzz",
-    "pyacoustid",
-    "pygame",
-    "ImageHash",
-    "scikit-image",
-    "librosa",
-    "pymupdf",
-    "chardet",
-    "playwright",
-    "formulas",
-    "pydrive",
-    "fastdtw",
-    "odfpy",
-    "func-timeout",
-    "beautifulsoup4",
-    "dashscope",
-    "google-generativeai",
-    "PyYaml",
-    "mutagen",
-    "easyocr",
-    "borb",
-    "pypdf2",
-    "pdfplumber",
-    "wandb",
-    "wrapt_timeout_decorator",
-    "gdown",
-    "azure-identity",
-    "azure-mgmt-compute",
-    "azure-mgmt-network",
-    "docker",
-    "loguru",
-    "dotenv",
-    'pyobjc; platform_system == "Darwin"',
-    'pywinauto; platform_system == "Windows"',
-    'pywin32; platform_system == "Windows"',
-    "tldextract>=5.3.0",
-]
+
+[tool.poetry.dependencies]
+python = "3.10.19"
+numpy = "~1.24.4"
+Pillow = "~11.0.0"
+fabric = "*"
+gymnasium = "~0.28.1"
+requests = "*"
+pytz = "~2024.1"
+transformers = "4.53.0"
+torch = "~2.5.0"
+accelerate = "*"
+opencv-python-headless = "~4.8.1.78"
+matplotlib = "~3.7.4"
+pynput = "~1.7.6"
+pyautogui = "~0.9.54"
+psutil = "~5.9.6"
+tqdm = "~4.65.0"
+pandas = "~2.2.3"
+flask = "~3.0.0"
+requests-toolbelt = "~1.0.0"
+ag2 = "~0.9.7"
+lxml = "*"
+cssselect = "*"
+xmltodict = "*"
+openpyxl = "*"
+python-docx = "*"
+python-pptx = "*"
+pypdf = "*"
+PyGetWindow = "*"
+rapidfuzz = "*"
+pyacoustid = "*"
+pygame = "*"
+ImageHash = "*"
+scikit-image = "*"
+librosa = "*"
+pymupdf = "*"
+chardet = "*"
+playwright = "*"
+backoff = "*"
+formulas = "*"
+pydrive = "*"
+fastdtw = "*"
+odfpy = "*"
+openai = "*"
+func-timeout = "*"
+beautifulsoup4 = "*"
+dashscope = "*"
+google-generativeai = "*"
+PyYaml = "*"
+mutagen = "*"
+easyocr = "*"
+borb = "*"
+pypdf2 = "*"
+pdfplumber = "*"
+wandb = "*"
+wrapt_timeout_decorator = "*"
+gdown = "*"
+tiktoken = "*"
+groq = "*"
+boto3 = "*"
+azure-identity = "*"
+azure-mgmt-compute = "*"
+azure-mgmt-network = "*"
+docker = "*"
+loguru = "*"
+dotenv = "*"
+tldextract = "*"
+anthropic = "*"
+alibabacloud_ecs20140526 = "*"
+alibabacloud_tea_openapi = "*"
+alibabacloud_tea_util = "*"
+json_minify = "*"
+json_repair = "*"
+awscli = "^1.42.66"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

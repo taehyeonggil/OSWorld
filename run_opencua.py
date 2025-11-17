@@ -1,12 +1,27 @@
-"""Script to run end-to-end evaluation on the benchmark.
-Utils and basic architecture credit to https://github.com/web-arena-x/webarena/blob/main/run.py.
+"""Script to run OpenCUA agent on OSWorld tasks locally.
+
+This script runs OpenCUA agents on OSWorld tasks using local providers (vmware, docker, virtualbox, etc.).
+
+You should first host the OpenCUA model on your local machine or a server.
+
+Example command for OpenCUA-72B:
+    python run_opencua.py \
+        --headless \
+        --observation_type screenshot \
+        --model OpenCUA-72B \
+        --result_dir ./results \
+        --test_all_meta_path evaluation_examples/test_nogdrive.json \
+        --max_steps 100 \
+        --coordinate_type qwen25
+
+Example command for OpenCUA-7B and OpenCUA-32B:
 """
 
+from __future__ import annotations
 import argparse
 import datetime
 import json
 import logging
-import dotenv
 import os
 import sys
 
@@ -14,14 +29,16 @@ from tqdm import tqdm
 
 import lib_run_single
 from desktop_env.desktop_env import DesktopEnv
-from mm_agents.agent import PromptAgent
+from mm_agents.opencua import OpenCUAAgent
+import dotenv
+
+from transformers import (
+    AutoTokenizer,
+    AutoModel,
+    AutoImageProcessor,
+)
 
 dotenv.load_dotenv()
-openai_api_key = os.environ.get('OPENAI_API_KEY', '')
-print("OPEN API KEY")
-print(openai_api_key)
-
-# Almost deprecated since it's not multi-env, use run_multienv_*.py instead
 
 #  Logger Configs {{{ #
 logger = logging.getLogger()
@@ -65,9 +82,16 @@ logger.addHandler(sdebug_handler)
 logger = logging.getLogger("desktopenv.experiment")
 
 
+MODEL_DIR = "OpenCUA-7B"
+
+opencua_tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR, trust_remote_code=True)
+opencua_model = AutoModel.from_pretrained(MODEL_DIR, torch_dtype="auto", device_map="auto", trust_remote_code=True)
+opencua_image_processor = AutoImageProcessor.from_pretrained(MODEL_DIR, trust_remote_code=True)
+
+
 def config() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run end-to-end evaluation on the benchmark"
+        description="Run OpenCUA agent on OSWorld tasks locally"
     )
 
     # environment config
@@ -85,37 +109,43 @@ def config() -> argparse.Namespace:
     parser.add_argument(
         "--observation_type",
         choices=["screenshot", "a11y_tree", "screenshot_a11y_tree", "som"],
-        default="a11y_tree",
+        default="screenshot",
         help="Observation type",
     )
     parser.add_argument("--screen_width", type=int, default=1920)
     parser.add_argument("--screen_height", type=int, default=1080)
-    parser.add_argument("--sleep_after_execution", type=float, default=0.0)
-    parser.add_argument("--max_steps", type=int, default=15)
+    parser.add_argument("--sleep_after_execution", type=float, default=5.0)
+    parser.add_argument("--max_steps", type=int, default=100)
 
-    # agent config
-    parser.add_argument("--max_trajectory_length", type=int, default=3)
+    # evaluation config
     parser.add_argument(
         "--test_config_base_dir", type=str, default="evaluation_examples"
     )
 
     # lm config
-    parser.add_argument("--model", type=str, default="gpt-4o")
-    parser.add_argument("--temperature", type=float, default=1.0)
+    parser.add_argument("--model", type=str, default=None)
+    parser.add_argument("--temperature", type=float, default=0)
     parser.add_argument("--top_p", type=float, default=0.9)
-    parser.add_argument("--max_tokens", type=int, default=1500)
+    parser.add_argument("--max_tokens", type=int, default=2048)
     parser.add_argument("--stop_token", type=str, default=None)
+
+    # OpenCUA agent config
+    parser.add_argument("--cot_level", type=str, default="l2", help="CoT version: l1, l2, l3. Default is l2 includes 'thought' and 'action'")
+    parser.add_argument("--history_type", type=str, default="action_history", help="Use action to represent history steps", choices=["action_history", "thought_history", "observation_history"])
+    parser.add_argument("--coordinate_type", type=str, default="qwen25", help="Type of coordinate: Qwen2-VL or Kimi-VL based models use 'relative'; Qwen2.5-VL based models use 'qwen25'", choices=["relative", "qwen25"])
+    parser.add_argument("--max_image_history_length", type=int, default=3, help="The max number of images in the history.")
+    parser.add_argument("--use_old_sys_prompt", action="store_true", help="Use the old system prompt for OpenCUA-7B and OpenCUA-32B")
 
     # example config
     parser.add_argument("--domain", type=str, default="all")
     parser.add_argument(
-        "--test_all_meta_path", type=str, default="evaluation_examples/test_all.json"
+        "--test_all_meta_path", type=str, default="evaluation_examples/test_nogdrive.json"
     )
 
     # logging related
     parser.add_argument("--result_dir", type=str, default="./results")
+    parser.add_argument("--password", type=str, default="osworld-public-evaluation", help="The password for the computer if needed")
     args = parser.parse_args()
-
     return args
 
 
@@ -125,35 +155,37 @@ def test(args: argparse.Namespace, test_all_meta: dict) -> None:
 
     # log args
     logger.info("Args: %s", args)
-    # set wandb project
-    cfg_args = {
-        "path_to_vm": args.path_to_vm,
-        "provider_name": args.provider_name,
-        "headless": args.headless,
-        "action_space": args.action_space,
-        "observation_type": args.observation_type,
-        "screen_width": args.screen_width,
-        "screen_height": args.screen_height,
-        "sleep_after_execution": args.sleep_after_execution,
-        "max_steps": args.max_steps,
-        "max_trajectory_length": args.max_trajectory_length,
-        "model": args.model,
-        "temperature": args.temperature,
-        "top_p": args.top_p,
-        "max_tokens": args.max_tokens,
-        "stop_token": args.stop_token,
-        "result_dir": args.result_dir,
-    }
 
-    agent = PromptAgent(
+    agent = OpenCUAAgent(
         model=args.model,
         max_tokens=args.max_tokens,
         top_p=args.top_p,
         temperature=args.temperature,
         action_space=args.action_space,
         observation_type=args.observation_type,
-        max_trajectory_length=args.max_trajectory_length,
+        cot_level=args.cot_level,
+        history_type=args.history_type,
+        screen_size=(args.screen_width, args.screen_height),
+        coordinate_type=args.coordinate_type,
+        max_image_history_length=args.max_image_history_length,
+        max_steps=args.max_steps,
+        use_old_sys_prompt=args.use_old_sys_prompt,
+        password=args.password,
+        opencua_tokenizer = opencua_tokenizer, 
+        opencua_model = opencua_model,
+        opencua_image_processor = opencua_image_processor
     )
+
+    # opencua_model = PromptAgent(
+    #     model=args.model,
+    #     max_tokens=args.max_tokens,
+    #     top_p=args.top_p,
+    #     temperature=args.temperature,
+    #     action_space=args.action_space,
+    #     observation_type=args.observation_type,
+    #     max_trajectory_length=args.max_trajectory_length,
+    # )
+
 
     env = DesktopEnv(
         provider_name=args.provider_name,
@@ -161,9 +193,8 @@ def test(args: argparse.Namespace, test_all_meta: dict) -> None:
         action_space=agent.action_space,
         screen_size=(args.screen_width, args.screen_height),
         headless=args.headless,
-        os_type = "Ubuntu",
-        require_a11y_tree=args.observation_type
-        in ["a11y_tree", "screenshot_a11y_tree", "som"],
+        os_type="Ubuntu",
+        require_a11y_tree=args.observation_type in ["a11y_tree", "screenshot_a11y_tree", "som"],
     )
 
     for domain in tqdm(test_all_meta, desc="Domain"):
@@ -180,12 +211,6 @@ def test(args: argparse.Namespace, test_all_meta: dict) -> None:
             instruction = example["instruction"]
 
             logger.info(f"[Instruction]: {instruction}")
-            # wandb each example config settings
-            cfg_args["instruction"] = instruction
-            cfg_args["start_time"] = datetime.datetime.now().strftime(
-                "%Y:%m:%d-%H:%M:%S"
-            )
-            # run.config.update(cfg_args)
 
             example_result_dir = os.path.join(
                 args.result_dir,
@@ -198,7 +223,7 @@ def test(args: argparse.Namespace, test_all_meta: dict) -> None:
             os.makedirs(example_result_dir, exist_ok=True)
             # example start running
             try:
-                lib_run_single.run_single_example(
+                lib_run_single.run_single_example_opencua(
                     agent,
                     env,
                     example,
@@ -210,15 +235,20 @@ def test(args: argparse.Namespace, test_all_meta: dict) -> None:
                 )
             except Exception as e:
                 logger.error(f"Exception in {domain}/{example_id}: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
                 # Only attempt to end recording if controller exists (not Docker provider)
                 if hasattr(env, 'controller') and env.controller is not None:
-                    env.controller.end_recording(
-                        os.path.join(example_result_dir, "recording.mp4")
-                    )
+                    try:
+                        env.controller.end_recording(
+                            os.path.join(example_result_dir, "recording.mp4")
+                        )
+                    except Exception as rec_e:
+                        logger.error(f"Failed to end recording: {rec_e}")
                 with open(os.path.join(example_result_dir, "traj.jsonl"), "a") as f:
                     f.write(
                         json.dumps(
-                            {"Error": f"Time limit exceeded in {domain}/{example_id}"}
+                            {"Error": f"{domain}/{example_id} - {e}"}
                         )
                     )
                     f.write("\n")

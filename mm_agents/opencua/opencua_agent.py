@@ -19,6 +19,10 @@ import httpx
 import base64
 import backoff
 import traceback
+import torch
+from PIL import Image
+import io
+
 from loguru import logger
 from typing import Dict, List, Tuple, Optional
 from mm_agents.opencua.utils import (
@@ -273,6 +277,10 @@ class OpenCUAAgent:
         self.max_steps = max_steps
         self.password = password
 
+        self.opencua_tokenizer = kwargs.get('opencua_tokenizer')
+        self.opencua_model = kwargs.get('opencua_model')
+        self.opencua_image_processor = kwargs.get('opencua_image_processor')
+
         if history_type == "action_history":
             self.HISTORY_TEMPLATE = ACTION_HISTORY_TEMPLATE
         elif history_type == "thought_history":
@@ -386,39 +394,42 @@ class OpenCUAAgent:
             ]
         })
 
+        sc_bytes = io.BytesIO(obs['screenshot'])
+        sc_img_obj = Image.open(sc_bytes)
+        input_ids = self.opencua_tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True)
+        info = self.opencua_image_processor.preprocess(images=[sc_img_obj])
+        pixel_values = torch.tensor(info['pixel_values']).to(dtype=torch.bfloat16, device=self.opencua_model.device)
+        grid_thws = torch.tensor(info['image_grid_thw'])
+        input_ids = torch.tensor([input_ids]).to(self.opencua_model.device)
+
         max_retry = 5
         retry_count = 0
         low_level_instruction = None
         pyautogui_actions = None
         other_cot = {}
 
-        while retry_count < max_retry:
-            try:
-                response = self.call_llm({
-                    "model": self.model,
-                    "messages": messages,
-                    "max_tokens": self.max_tokens,
-                    "top_p": self.top_p,
-                    "temperature": self.temperature if retry_count==0 else max(0.2, self.temperature)
-                }, self.model)
+        try:
+            generated_ids = self.opencua_model.generate(
+                input_ids, 
+                pixel_values=pixel_values, 
+                grid_thws=grid_thws,
+                max_new_tokens=512,
+                temperature=0
+                )
+            prompt_len = input_ids.shape[1]
+            generated_ids = generated_ids[:, prompt_len:]
+            response = self.opencua_tokenizer.batch_decode(
+                generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False
+            )[0]
+            low_level_instruction, pyautogui_actions, other_cot = parse_response_to_cot_and_action(response, self.screen_size, self.coordinate_type)
+        except Exception as e:
+            logger.error(f"Error during message preparation: {e}")
+            retry_count += 1
+            if retry_count == max_retry:
+                logger.error("Maximum retries reached. Exiting.")
+                return str(e), ['FAIL'], other_cot
 
-                logger.info(f"Model Output: \n{response}")
-                if not response:
-                    logger.error("No response found in the response.")
-                    raise ValueError(f"No response found in the response:\n{response}.")
 
-                low_level_instruction, pyautogui_actions, other_cot = parse_response_to_cot_and_action(response, self.screen_size, self.coordinate_type)
-                if "<Error>" in low_level_instruction or not pyautogui_actions:
-                    logger.error(f"Error parsing response: {low_level_instruction}")
-                    raise ValueError(f"Error parsing response: {low_level_instruction}")
-                break
-                
-            except Exception as e:
-                logger.error(f"Error during message preparation: {e}")
-                retry_count += 1
-                if retry_count == max_retry:
-                    logger.error("Maximum retries reached. Exiting.")
-                    return str(e), ['FAIL'], other_cot
 
         pyautogui_actions = [
             self._scale_scroll_for_windows(code) for code in pyautogui_actions
@@ -441,21 +452,23 @@ class OpenCUAAgent:
             
     
     def call_llm(self, payload, model):
-        """Call the LLM API"""
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {os.environ['OPENCUA_API_KEY']}"
-        }
+        # """Call the LLM API""" Original Code
+        # headers = {
+        #     "Content-Type": "application/json",
+        #     "Authorization": f"Bearer {os.environ['OPENCUA_API_KEY']}"
+        # }     
 
         for _ in range(20):
-            response = httpx.post(
-                f"https://{self.model}.app.msh.team/v1/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=500,
-                verify=False
-            )
-
+            print(f"xogud debugging: {self.model}")
+            # response = httpx.post(
+            #     f"https://{self.model}.app.msh.team/v1/chat/completions",
+            #     headers=headers,
+            #     json=payload,
+            #     timeout=500,
+            #     verify=False
+            # )
+            
+            pass
             if response.status_code != 200:
                 logger.error("Failed to call LLM: " + response.text)
                 logger.error("Retrying...")
