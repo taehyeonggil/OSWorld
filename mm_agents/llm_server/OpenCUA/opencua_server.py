@@ -189,6 +189,56 @@ def extract_images_from_messages(messages: List[ChatMessageInput]) -> List[Image
     return img_list
 
 
+def convert_messages_to_dict(messages: List[ChatMessageInput]) -> List[dict]:
+    """
+    Convert Pydantic ChatMessageInput models to plain dictionaries
+    that the tokenizer's apply_chat_template can process.
+    
+    Args:
+        messages: List of ChatMessageInput Pydantic models
+    
+    Returns:
+        List of plain dictionaries in the format expected by the tokenizer
+    """
+    converted_messages = []
+    
+    for message in messages:
+        msg_dict = {
+            "role": message.role
+        }
+        
+        # Handle content conversion
+        if isinstance(message.content, str):
+            # Simple string content
+            msg_dict["content"] = message.content
+        elif isinstance(message.content, list):
+            # List of ContentItem objects
+            content_list = []
+            for item in message.content:
+                if isinstance(item, ImageUrlContent):
+                    # Convert ImageUrlContent to dict format
+                    content_list.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": item.image_url.url
+                        }
+                    })
+                elif isinstance(item, TextContent):
+                    # Convert TextContent to dict format
+                    content_list.append({
+                        "type": "text",
+                        "text": item.text
+                    })
+            msg_dict["content"] = content_list
+        else:
+            # Fallback: use string representation
+            msg_dict["content"] = str(message.content)
+        
+        converted_messages.append(msg_dict)
+    
+    return converted_messages
+
+
 @app.post("/v1/chat/completions", response_model=ChatCompletionResponse)
 async def create_chat_completion(request: ChatCompletionRequest):
     """Create a chat completion using OpenCUA model."""
@@ -207,9 +257,13 @@ async def create_chat_completion(request: ChatCompletionRequest):
         # Extract images from messages
         img_list = extract_images_from_messages(request.messages)
         
+        # Convert Pydantic models to plain dictionaries for tokenizer
+        if not isinstance(request.messages, dict):
+            messages = convert_messages_to_dict(request.messages)
+        
         # Apply chat template to get input_ids
         input_ids = opencua_tokenizer.apply_chat_template(
-            request.messages, 
+            messages, 
             tokenize=True, 
             add_generation_prompt=True
         )

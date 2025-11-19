@@ -176,17 +176,6 @@ def test(args: argparse.Namespace, test_all_meta: dict) -> None:
         opencua_image_processor = opencua_image_processor
     )
 
-    # opencua_model = PromptAgent(
-    #     model=args.model,
-    #     max_tokens=args.max_tokens,
-    #     top_p=args.top_p,
-    #     temperature=args.temperature,
-    #     action_space=args.action_space,
-    #     observation_type=args.observation_type,
-    #     max_trajectory_length=args.max_trajectory_length,
-    # )
-
-
     env = DesktopEnv(
         provider_name=args.provider_name,
         path_to_vm=args.path_to_vm,

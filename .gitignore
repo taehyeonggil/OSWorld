@@ -207,8 +207,11 @@ quick_start.py
 
 # edited by Taehyeong
 OpenCUA-7B/
+OpenCUA-32B/
 aws/host_machine.pem
 aws/osworld_key.pem
 aws/vpc_host_machine.pem
 
 poetry.lock
+
+osworld/
