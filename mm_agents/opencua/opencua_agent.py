@@ -27,6 +27,7 @@ from loguru import logger
 from typing import Dict, List, Tuple, Optional
 from mm_agents.opencua.utils import (
     encode_image,
+    decode_image,
     smart_resize,
 )
 from mm_agents.opencua.prompts import (
@@ -254,6 +255,7 @@ class OpenCUAAgent:
             coordinate_type: str = "relative", # The coordinate type: relative, absolute, qwen25
             use_old_sys_prompt: bool = False, # Whether to use the old system prompt
             password="osworld-public-evaluation", # The password for the ubuntu platform
+            server_url: Optional[str] = None, # URL of the VLM server (e.g., "http://localhost:7908"). If None, uses direct model calls.
             **kwargs
     ):
         assert coordinate_type in ["relative", "absolute", "qwen25"]
@@ -276,10 +278,20 @@ class OpenCUAAgent:
         self.max_image_history_length = max_image_history_length
         self.max_steps = max_steps
         self.password = password
+        self.server_url = server_url
 
-        self.opencua_tokenizer = kwargs.get('opencua_tokenizer')
-        self.opencua_model = kwargs.get('opencua_model')
-        self.opencua_image_processor = kwargs.get('opencua_image_processor')
+        # If server_url is provided, use server mode; otherwise use direct model calls
+        if self.server_url is None:
+            self.opencua_tokenizer = kwargs.get('opencua_tokenizer')
+            self.opencua_model = kwargs.get('opencua_model')
+            self.opencua_image_processor = kwargs.get('opencua_image_processor')
+            if self.opencua_model is None or self.opencua_tokenizer is None or self.opencua_image_processor is None:
+                raise ValueError("When server_url is not provided, opencua_tokenizer, opencua_model, and opencua_image_processor must be provided in kwargs")
+        else:
+            self.opencua_tokenizer = None
+            self.opencua_model = None
+            self.opencua_image_processor = None
+            logger.info(f"Using VLM server mode with URL: {self.server_url}")
 
         if history_type == "action_history":
             self.HISTORY_TEMPLATE = ACTION_HISTORY_TEMPLATE
@@ -312,7 +324,8 @@ class OpenCUAAgent:
 
     def reset(self, _logger=None):
         global logger
-        logger = _logger if _logger is not None else logging.getLogger("desktopenv.agent")
+        if _logger is not None:
+            logger = _logger
         
         self.observations = []
         self.cots = []
@@ -394,40 +407,98 @@ class OpenCUAAgent:
             ]
         })
 
-        sc_bytes = io.BytesIO(obs['screenshot'])
-        sc_img_obj = Image.open(sc_bytes)
-        input_ids = self.opencua_tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True)
-        info = self.opencua_image_processor.preprocess(images=[sc_img_obj])
-        pixel_values = torch.tensor(info['pixel_values']).to(dtype=torch.bfloat16, device=self.opencua_model.device)
-        grid_thws = torch.tensor(info['image_grid_thw'])
-        input_ids = torch.tensor([input_ids]).to(self.opencua_model.device)
-
         max_retry = 5
         retry_count = 0
         low_level_instruction = None
         pyautogui_actions = None
         other_cot = {}
+        response = None
 
-        try:
-            generated_ids = self.opencua_model.generate(
-                input_ids, 
-                pixel_values=pixel_values, 
-                grid_thws=grid_thws,
-                max_new_tokens=512,
-                temperature=0
-                )
-            prompt_len = input_ids.shape[1]
-            generated_ids = generated_ids[:, prompt_len:]
-            response = self.opencua_tokenizer.batch_decode(
-                generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False
-            )[0]
-            low_level_instruction, pyautogui_actions, other_cot = parse_response_to_cot_and_action(response, self.screen_size, self.coordinate_type)
-        except Exception as e:
-            logger.error(f"Error during message preparation: {e}")
-            retry_count += 1
-            if retry_count == max_retry:
-                logger.error("Maximum retries reached. Exiting.")
-                return str(e), ['FAIL'], other_cot
+        if self.server_url is None:
+            # Direct model inference mode
+            input_ids = self.opencua_tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True)
+
+            img_list = list()
+
+            for message in messages:
+                if message['role'] == 'user':
+                    img_url = message['content'][0]['image_url'].split(',')[1]
+                    img_bytes = decode_image(img_url)
+                    sc_bytes = io.BytesIO(img_bytes)
+                    sc_img_obj = Image.open(sc_bytes)
+                    img_list.append(sc_img_obj)
+                        
+            info = self.opencua_image_processor.preprocess(images=img_list)
+            pixel_values = torch.tensor(info['pixel_values']).to(dtype=torch.bfloat16, device=self.opencua_model.device)
+            grid_thws = torch.tensor(info['image_grid_thw'])
+            input_ids = torch.tensor([input_ids]).to(self.opencua_model.device)
+
+            try:
+                generated_ids = self.opencua_model.generate(
+                    input_ids, 
+                    pixel_values=pixel_values, 
+                    grid_thws=grid_thws,
+                    max_new_tokens=512,
+                    temperature=0
+                    )
+                prompt_len = input_ids.shape[1]
+                generated_ids = generated_ids[:, prompt_len:]
+                response = self.opencua_tokenizer.batch_decode(
+                    generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False
+                )[0]
+                low_level_instruction, pyautogui_actions, other_cot = parse_response_to_cot_and_action(response, self.screen_size, self.coordinate_type)
+            except Exception as e:
+                logger.error(f"Error during message preparation: {e}")
+                retry_count += 1
+                if retry_count == max_retry:
+                    logger.error("Maximum retries reached. Exiting.")
+                    return str(e), ['FAIL'], other_cot
+        else:
+            # Server mode - use HTTP requests
+            while retry_count < max_retry:
+                try:
+                    payload = {
+                        "model": self.model,
+                        "messages": messages,
+                        "temperature": self.temperature,
+                        "top_p": self.top_p,
+                        "max_tokens": 512,
+                        "stream": False
+                    }
+                    
+                    response_obj = self.call_llm(payload, self.model)
+                    if response_obj is None or response_obj == "":
+                        retry_count += 1
+                        if retry_count < max_retry:
+                            logger.warning(f"Empty response, retrying... ({retry_count}/{max_retry})")
+                            time.sleep(2)
+                            continue
+                        else:
+                            logger.error("Maximum retries reached with empty responses.")
+                            return "<Error>: Empty response from server", ['FAIL'], other_cot
+                    
+                    # Extract response content
+                    if isinstance(response_obj, str):
+                        response = response_obj
+                    elif isinstance(response_obj, dict):
+                        response = response_obj.get('choices', [{}])[0].get('message', {}).get('content', '')
+                    else:
+                        response = str(response_obj)
+                    
+                    low_level_instruction, pyautogui_actions, other_cot = parse_response_to_cot_and_action(response, self.screen_size, self.coordinate_type)
+                    break
+                    
+                except Exception as e:
+                    logger.error(f"Error during server request: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    retry_count += 1
+                    if retry_count < max_retry:
+                        logger.warning(f"Retrying... ({retry_count}/{max_retry})")
+                        time.sleep(2)
+                    else:
+                        logger.error("Maximum retries reached. Exiting.")
+                        return str(e), ['FAIL'], other_cot
 
 
 
@@ -451,33 +522,49 @@ class OpenCUAAgent:
         return response, pyautogui_actions, other_cot
             
     
+    @backoff.on_exception(
+        backoff.expo,
+        (httpx.HTTPError, httpx.TimeoutException, httpx.ConnectError),
+        max_tries=5,
+        max_time=300
+    )
     def call_llm(self, payload, model):
-        # """Call the LLM API""" Original Code
-        # headers = {
-        #     "Content-Type": "application/json",
-        #     "Authorization": f"Bearer {os.environ['OPENCUA_API_KEY']}"
-        # }     
-
-        for _ in range(20):
-            print(f"xogud debugging: {self.model}")
-            # response = httpx.post(
-            #     f"https://{self.model}.app.msh.team/v1/chat/completions",
-            #     headers=headers,
-            #     json=payload,
-            #     timeout=500,
-            #     verify=False
-            # )
+        """Call the VLM server API"""
+        if self.server_url is None:
+            raise ValueError("server_url must be set to use call_llm method")
+        
+        headers = {
+            "Content-Type": "application/json",
+        }
+        
+        url = f"{self.server_url}/v1/chat/completions"
+        
+        try:
+            response = httpx.post(
+                url,
+                headers=headers,
+                json=payload,
+                timeout=500.0,
+                verify=False
+            )
             
-            pass
             if response.status_code != 200:
-                logger.error("Failed to call LLM: " + response.text)
-                logger.error("Retrying...")
-                time.sleep(5)
+                error_msg = f"Failed to call VLM server: {response.status_code} - {response.text}"
+                logger.error(error_msg)
+                response.raise_for_status()
+            
+            response_json = response.json()
+            finish_reason = response_json["choices"][0].get("finish_reason")
+            
+            if finish_reason is not None and finish_reason == "stop":
+                return response_json['choices'][0]['message']['content']
             else:
-                response = response.json()
-                finish_reason = response["choices"][0].get("finish_reason")
-                if finish_reason is not None and finish_reason == "stop": # for most of the time, length will not exceed max_tokens
-                    return response['choices'][0]['message']['content']
-                else:
-                    logger.error("LLM did not finish properly, retrying...")
-                    time.sleep(5)
+                logger.warning(f"LLM did not finish properly (finish_reason: {finish_reason}), but returning content anyway")
+                return response_json['choices'][0]['message']['content']
+                
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error calling VLM server: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error calling VLM server: {e}")
+            raise

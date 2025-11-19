@@ -11,6 +11,9 @@ import math
 def encode_image(image_content):
     return base64.b64encode(image_content).decode("utf-8")
 
+def decode_image(b64):
+    return base64.b64decode(b64)
+
 def smart_resize(
     height: int,
     width: int,
