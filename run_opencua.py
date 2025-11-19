@@ -84,6 +84,7 @@ logger = logging.getLogger("desktopenv.experiment")
 
 MODEL_DIR = "OpenCUA-7B"
 
+
 opencua_tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR, trust_remote_code=True)
 opencua_model = AutoModel.from_pretrained(MODEL_DIR, torch_dtype="auto", device_map="auto", trust_remote_code=True)
 opencua_image_processor = AutoImageProcessor.from_pretrained(MODEL_DIR, trust_remote_code=True)
@@ -171,6 +172,7 @@ def test(args: argparse.Namespace, test_all_meta: dict) -> None:
         max_steps=args.max_steps,
         use_old_sys_prompt=args.use_old_sys_prompt,
         password=args.password,
+        server_url='http://192.168.0.120:7908',
         opencua_tokenizer = opencua_tokenizer, 
         opencua_model = opencua_model,
         opencua_image_processor = opencua_image_processor
