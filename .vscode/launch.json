@@ -1,0 +1,53 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [    
+        {
+            "name": "run multienv opencua",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "run_multienv_opencua.py",
+            "console": "integratedTerminal",
+            "args": ["--headless",
+            "--observation_type", "screenshot",
+            "--model", "OpenCUA-32B",
+            "--result_dir", "./results",
+            "--test_all_meta_path", "evaluation_examples/test_nogdrive.json",
+            "--max_steps", "100",
+            "--num_envs", "30",
+            "--coordinate_type", "qwen25",
+            "--use_old_sys_prompt",
+    	    "--region", "ap-southeast-2"
+        ]
+        },
+        {
+            "name": "run opencua",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "run_opencua.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--headless",
+                "--observation_type", "screenshot",
+                "--model", "OpenCUA-7B",
+                "--result_dir", "./results",
+                "--test_all_meta_path", "evaluation_examples/test_nogdrive.json",
+                "--max_steps", "100",
+                "--coordinate_type", "qwen25"
+            ]
+        },
+        {
+            "name": "OpenCUA VLM Server",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "mm_agents.llm_server.OpenCUA.opencua_server",
+            "console": "integratedTerminal",
+            "args": [
+                "--model_path", "OpenCUA-7B",
+                "--port", "7908"
+            ]
+        }
+    ]
+}
