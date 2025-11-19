@@ -14,6 +14,7 @@ gymnasium = "~0.28.1"
 requests = "*"
 pytz = "~2024.1"
 transformers = "4.53.0"
+huggingface-hub = "0.36.0"
 torch = "~2.5.0"
 accelerate = "*"
 opencv-python-headless = "~4.8.1.78"
@@ -79,6 +80,8 @@ alibabacloud_tea_util = "*"
 json_minify = "*"
 json_repair = "*"
 awscli = "^1.42.66"
+uvicorn = "^0.38.0"
+fastapi = "^0.121.2"
 
 [build-system]
 requires = ["poetry-core"]
