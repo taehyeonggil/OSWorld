@@ -195,8 +195,6 @@ vmware_vm_data
 # result
 **/result*/**/*
 
-.vscode
-
 dataimpulse_proxy_config.json
 
 ## reference and draft and debug
